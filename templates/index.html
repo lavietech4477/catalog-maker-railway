@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Catalog Maker - Bagzone</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="/assets/bagzonelogo.jpg" alt="Bagzone logo">
+          <div>
+            <p class="eyebrow">Internal Tool</p>
+            <h1>Catalog Maker</h1>
+          </div>
+        </div>
+        <nav class="top-actions" aria-label="Account actions">
+          {% if current_user.is_admin %}
+            <a class="sample-link" href="/admin/users">Users</a>
+          {% endif %}
+          <a class="sample-link" href="/sample-template">Sample XLSX</a>
+          <form method="post" action="/logout">
+            <button class="sample-link logout-link" type="submit">Logout</button>
+          </form>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="tag">CSV / XLSX to PDF catalog</p>
+          <h2>Upload SKUs. Generate catalog. Download PDF.</h2>
+        </div>
+        <form id="catalog-form" class="upload-panel">
+          <label class="dropzone" for="sku-file">
+            <input id="sku-file" name="sku_file" type="file" accept=".csv,.xlsx" required>
+            <span class="drop-title">Choose SKU file</span>
+            <span id="file-name" class="drop-meta">CSV or XLSX</span>
+          </label>
+          <button id="generate-btn" class="primary-btn" type="submit">Generate Catalog</button>
+        </form>
+      </section>
+
+      <section id="status-card" class="status-card hidden" aria-live="polite">
+        <div class="loader" aria-hidden="true"></div>
+        <div>
+          <h3 id="status-title">Generating catalog</h3>
+          <p id="status-text">Fetching Dropbox images and building PDF.</p>
+          <div class="progress-shell" aria-label="Catalog generation progress">
+            <div id="progress-bar" class="progress-bar"></div>
+          </div>
+          <div class="progress-meta">
+            <span id="progress-count">0 / 0 SKUs</span>
+            <span id="progress-percent">0%</span>
+          </div>
+          <div class="status-actions">
+            <button id="stop-btn" class="stop-btn hidden" type="button">Stop</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="result-card" class="result-card hidden">
+        <div class="result-head">
+          <div>
+            <p class="eyebrow">Generation Report</p>
+            <h3 id="result-title">Catalog ready</h3>
+          </div>
+          <button id="download-btn" class="download-btn" type="button">Download PDF</button>
+        </div>
+
+        <div class="stats">
+          <article>
+            <span id="pages-count">0</span>
+            <p>Total Pages</p>
+          </article>
+          <article>
+            <span id="data-count">0</span>
+            <p>Product Data</p>
+          </article>
+          <article>
+            <span id="images-count">0</span>
+            <p>Images</p>
+          </article>
+          <article>
+            <span id="missing-count">0</span>
+            <p>Missing Images</p>
+          </article>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Brand</th>
+                <th>Title</th>
+                <th>NEW MRP</th>
+                <th>Images</th>
+                <th>GS1</th>
+                <th>Dropbox</th>
+              </tr>
+            </thead>
+            <tbody id="report-body"></tbody>
+          </table>
+        </div>
+        <div class="report-actions">
+          <button id="download-log-btn" class="download-btn" type="button">Download Log CSV</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
