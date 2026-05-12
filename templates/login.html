@@ -30,7 +30,7 @@
         <form class="auth-form" method="post" action="/login{% if request.args.get('next') %}?next={{ request.args.get('next')|urlencode }}{% endif %}">
           <label>
             <span>Email</span>
-            <input name="email" type="email" autocomplete="email" required>
+            <input name="email" type="email" autocomplete="email" value="{{ email or '' }}" required>
           </label>
           <label>
             <span>Password</span>
@@ -38,6 +38,7 @@
           </label>
           <button class="primary-btn" type="submit">Login</button>
         </form>
+        <p class="auth-switch">First time user? <a href="/register{% if request.args.get('next') %}?next={{ request.args.get('next')|urlencode }}{% endif %}">Register account</a></p>
       </section>
     </main>
   </body>
