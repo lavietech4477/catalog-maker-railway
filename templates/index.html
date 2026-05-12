@@ -27,6 +27,16 @@
         </nav>
       </header>
 
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-list page-flashes">
+            {% for category, message in messages %}
+              <p class="flash {{ category }}">{{ message }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
       <section class="hero">
         <div class="hero-copy">
           <p class="tag">CSV / XLSX to PDF catalog</p>
