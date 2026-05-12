@@ -480,11 +480,23 @@ td a {
   font-weight: 900;
 }
 
-.admin-grid {
+.admin-stack {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 24px;
   margin-top: 34px;
+}
+
+.admin-panel {
+  align-self: start;
+  align-content: start;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .admin-panel h2 {
@@ -498,20 +510,40 @@ td a {
   font-weight: 800;
 }
 
+.compact-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.2fr) minmax(180px, 1fr) minmax(140px, 0.65fr) minmax(150px, 0.7fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.compact-form label {
+  min-width: 0;
+}
+
+.compact-submit {
+  min-height: 46px;
+}
+
 .admin-user-list {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .admin-user-card {
   border: var(--line);
   background: var(--paper);
-  padding: 14px;
-}
-
-.admin-user-card form {
+  padding: 16px;
   display: grid;
   gap: 14px;
+}
+
+.user-edit-panel form {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 2px solid var(--ink);
 }
 
 .admin-user-head,
@@ -521,6 +553,22 @@ td a {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-user-identity {
+  min-width: min(100%, 360px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-user-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -549,7 +597,8 @@ td a {
 
 .admin-metrics span,
 .status-pill,
-.mini-link {
+.mini-link,
+.user-edit-panel summary {
   border: 2px solid var(--ink);
   background: var(--white);
   padding: 7px 8px;
@@ -557,6 +606,38 @@ td a {
   text-align: center;
   text-decoration: none;
   color: var(--ink);
+}
+
+.status-pill {
+  text-transform: capitalize;
+}
+
+.user-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.user-edit-panel {
+  width: 100%;
+}
+
+.user-edit-panel summary {
+  list-style: none;
+  cursor: pointer;
+  min-width: 132px;
+}
+
+.user-edit-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.user-edit-panel summary::after {
+  content: " +";
+}
+
+.user-edit-panel[open] summary::after {
+  content: " -";
 }
 
 .admin-edit-grid {
@@ -620,8 +701,8 @@ td a {
     grid-template-columns: 1fr;
   }
 
-  .admin-grid {
-    grid-template-columns: 1fr;
+  .compact-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-metrics,
@@ -640,8 +721,20 @@ td a {
     height: 42px;
   }
 
+  .compact-form,
   .admin-metrics,
   .admin-edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-user-head,
+  .admin-user-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mini-link,
+  .user-edit-panel summary {
+    width: 100%;
   }
 }
