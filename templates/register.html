@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Register - Catalog Maker</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <main class="auth-shell">
+      <section class="auth-panel">
+        <div class="auth-brand">
+          <img src="/assets/bagzonelogo.jpg" alt="Bagzone logo">
+          <div>
+            <p class="eyebrow">Internal Tool</p>
+            <h1>Create Account</h1>
+          </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flash-list">
+              {% for category, message in messages %}
+                <p class="flash {{ category }}">{{ message }}</p>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <form class="auth-form" method="post" action="/register{% if request.args.get('next') %}?next={{ request.args.get('next')|urlencode }}{% endif %}">
+          <label>
+            <span>Name</span>
+            <input name="name" type="text" autocomplete="name" value="{{ name or '' }}">
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" value="{{ email or '' }}" required>
+          </label>
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <label>
+            <span>Confirm Password</span>
+            <input name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <button class="primary-btn" type="submit">Register</button>
+        </form>
+        <p class="auth-switch">Already registered? <a href="/login{% if request.args.get('next') %}?next={{ request.args.get('next')|urlencode }}{% endif %}">Login</a></p>
+      </section>
+    </main>
+  </body>
+</html>
