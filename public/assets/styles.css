@@ -491,6 +491,13 @@ td a {
   font-size: 1.25rem;
 }
 
+.panel-note {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
 .admin-user-list {
   display: grid;
   gap: 16px;
