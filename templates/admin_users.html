@@ -34,94 +34,112 @@
         {% endif %}
       {% endwith %}
 
-      <section class="admin-grid">
-        <form class="admin-panel" method="post" action="/admin/users">
-          <h2>Create User</h2>
-          <label>
-            <span>Name</span>
-            <input name="name" type="text" autocomplete="name">
-          </label>
-          <label>
-            <span>Email</span>
-            <input name="email" type="email" autocomplete="email" required>
-          </label>
-          <label>
-            <span>Password</span>
-            <input name="password" type="password" autocomplete="new-password" minlength="8" required>
-          </label>
-          <label>
-            <span>Role</span>
-            <select name="role">
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-          </label>
-          <button class="primary-btn" type="submit">Create User</button>
-        </form>
+      <section class="admin-stack">
+        <section class="admin-panel create-user-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Create User</h2>
+              <p class="panel-note">Add a team member manually. Users can also register themselves from the login page.</p>
+            </div>
+          </div>
+          <form class="compact-form" method="post" action="/admin/users">
+            <label>
+              <span>Name</span>
+              <input name="name" type="text" autocomplete="name">
+            </label>
+            <label>
+              <span>Email</span>
+              <input name="email" type="email" autocomplete="email" required>
+            </label>
+            <label>
+              <span>Password</span>
+              <input name="password" type="password" autocomplete="new-password" minlength="8" required>
+            </label>
+            <label>
+              <span>Role</span>
+              <select name="role">
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
+            </label>
+            <button class="primary-btn compact-submit" type="submit">Create User</button>
+          </form>
+        </section>
 
-        <section class="admin-panel">
+        <section class="admin-panel users-panel">
           <h2>Existing Users</h2>
           <p class="panel-note">Job stats show the last {{ retention_days }} days.</p>
           <div class="admin-user-list">
             {% for user in users %}
               {% set stats = user_stats[user.id] %}
               <article class="admin-user-card">
-                <form method="post" action="/admin/users/{{ user.id }}">
-                  <div class="admin-user-head">
+                <div class="admin-user-head">
+                  <div class="admin-user-identity">
                     <div>
                       <strong>{{ user.name }}</strong>
                       <span>{{ user.email }}</span>
                     </div>
+                    <div class="user-badges" aria-label="User status">
+                      <span class="status-pill">{{ user.role }}</span>
+                      <span class="status-pill">{{ "Active" if user.active else "Inactive" }}</span>
+                    </div>
+                  </div>
+                  <div class="admin-user-actions">
                     <a class="mini-link" href="/admin/users/{{ user.id }}/jobs">Jobs</a>
                   </div>
+                </div>
 
-                  <div class="admin-metrics">
-                    <span>{{ stats.total }} jobs</span>
-                    <span>{{ stats.active }} active</span>
-                    <span>{{ stats.complete }} ready</span>
-                    <span>{{ stats.failed }} failed</span>
-                  </div>
+                <div class="admin-metrics">
+                  <span>{{ stats.total }} jobs</span>
+                  <span>{{ stats.active }} active</span>
+                  <span>{{ stats.complete }} ready</span>
+                  <span>{{ stats.failed }} failed</span>
+                </div>
 
-                  <div class="admin-edit-grid">
-                    <label>
-                      <span>Name</span>
-                      <input name="name" type="text" value="{{ user.name }}">
-                    </label>
-                    <label>
-                      <span>Email</span>
-                      <input name="email" type="email" value="{{ user.email }}" required>
-                    </label>
-                    <label>
-                      <span>Role</span>
-                      <select name="role">
-                        <option value="user" {% if user.role == "user" %}selected{% endif %}>User</option>
-                        <option value="admin" {% if user.role == "admin" %}selected{% endif %}>Admin</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Status</span>
-                      <select name="active">
-                        <option value="1" {% if user.active %}selected{% endif %}>Active</option>
-                        <option value="0" {% if not user.active %}selected{% endif %}>Inactive</option>
-                      </select>
-                    </label>
-                    <label class="wide-field">
-                      <span>New Password</span>
-                      <input name="password" type="password" autocomplete="new-password" minlength="8" placeholder="Leave blank to keep current">
-                    </label>
-                  </div>
+                <div class="admin-user-foot">
+                  <span>Created {{ user.created_at|datetime }}</span>
+                  {% if stats.last_job %}
+                    <span>Last job: {{ stats.last_job.status }} at {{ stats.last_job.created_at|datetime }}</span>
+                  {% else %}
+                    <span>No jobs yet</span>
+                  {% endif %}
+                </div>
 
-                  <div class="admin-user-foot">
-                    <span>Created {{ user.created_at|datetime }}</span>
-                    {% if stats.last_job %}
-                      <span>Last job: {{ stats.last_job.status }} at {{ stats.last_job.created_at|datetime }}</span>
-                    {% else %}
-                      <span>No jobs yet</span>
-                    {% endif %}
-                  </div>
+                <details class="user-edit-panel">
+                  <summary>Modify User</summary>
+                  <form method="post" action="/admin/users/{{ user.id }}">
+                    <div class="admin-edit-grid">
+                      <label>
+                        <span>Name</span>
+                        <input name="name" type="text" value="{{ user.name }}">
+                      </label>
+                      <label>
+                        <span>Email</span>
+                        <input name="email" type="email" value="{{ user.email }}" required>
+                      </label>
+                      <label>
+                        <span>Role</span>
+                        <select name="role">
+                          <option value="user" {% if user.role == "user" %}selected{% endif %}>User</option>
+                          <option value="admin" {% if user.role == "admin" %}selected{% endif %}>Admin</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Status</span>
+                        <select name="active">
+                          <option value="1" {% if user.active %}selected{% endif %}>Active</option>
+                          <option value="0" {% if not user.active %}selected{% endif %}>Inactive</option>
+                        </select>
+                      </label>
+                      <label class="wide-field">
+                        <span>New Password</span>
+                        <input name="password" type="password" autocomplete="new-password" minlength="8" placeholder="Leave blank to keep current">
+                      </label>
+                    </div>
 
-                  <button class="secondary-btn" type="submit">Save Changes</button>
-                </form>
+                    <button class="secondary-btn" type="submit">Save Changes</button>
+                  </form>
+                </details>
               </article>
             {% endfor %}
           </div>
