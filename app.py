@@ -2,11 +2,13 @@ import io
 import json
 import os
 import queue
+import re
 import shutil
 import tempfile
 import threading
 import time
 import uuid
+from hashlib import sha1
 from datetime import datetime, timedelta
 from functools import lru_cache
 
@@ -61,11 +63,14 @@ STORAGE_PREFIX = os.getenv("STORAGE_PREFIX", "catalogs").strip("/")
 STORAGE_ENDPOINT_URL = os.getenv("STORAGE_ENDPOINT_URL", "")
 STORAGE_REGION = os.getenv("STORAGE_REGION", "auto")
 ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "bagzone.in").strip().lower()
+JOB_RETENTION_DAYS = max(1, int(os.getenv("JOB_RETENTION_DAYS", "10")))
+IMAGE_CACHE_DAYS = max(1, int(os.getenv("IMAGE_CACHE_DAYS", "30")))
 SHEET_NAME = "Master"
 HEADER_ROW_INDEX = 1
 SKU_COLUMN_NAME = "Article"
 ALLOWED_EXTENSIONS = {".csv", ".xlsx"}
-JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_MINUTES", "180")) * 60
+JOB_TTL_SECONDS = JOB_RETENTION_DAYS * 24 * 60 * 60
+IMAGE_CACHE_SECONDS = IMAGE_CACHE_DAYS * 24 * 60 * 60
 MAX_PARALLEL_JOBS = max(1, int(os.getenv("MAX_PARALLEL_JOBS", "2")))
 DROPBOX_TIMEOUT_SECONDS = max(5, int(os.getenv("DROPBOX_TIMEOUT_SECONDS", "20")))
 
@@ -322,7 +327,79 @@ def prepare_image_for_pdf(image_path):
         return image_path
 
 
+def safe_key_part(value):
+    text = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip())
+    return text.strip("-") or "item"
+
+
+def image_cache_prefix(sku):
+    prefix = f"{STORAGE_PREFIX}/" if STORAGE_PREFIX else ""
+    return f"{prefix}image-cache/{safe_key_part(sku.upper())}/"
+
+
+def image_cache_root_prefix():
+    prefix = f"{STORAGE_PREFIX}/" if STORAGE_PREFIX else ""
+    return f"{prefix}image-cache/"
+
+
+def cached_image_local_path(temp_dir, key, index):
+    base_name = os.path.basename(key) or f"image-{index}.jpg"
+    return os.path.join(temp_dir, f"cached-{index}-{base_name}")
+
+
+def load_cached_sku_images(sku, temp_dir):
+    s3_client = get_s3_client()
+    if not s3_client:
+        return []
+
+    try:
+        result = s3_client.list_objects_v2(Bucket=STORAGE_BUCKET, Prefix=image_cache_prefix(sku), MaxKeys=50)
+    except Exception:
+        return []
+
+    objects = sorted(result.get("Contents", []), key=lambda item: item.get("Key", ""))
+    fresh_objects = []
+    cutoff = datetime.utcnow().timestamp() - IMAGE_CACHE_SECONDS
+    for item in objects:
+        key = item.get("Key", "")
+        if not key or key.endswith("/"):
+            continue
+        last_modified = item.get("LastModified")
+        if last_modified and last_modified.timestamp() < cutoff:
+            delete_storage_key(key)
+            continue
+        fresh_objects.append(item)
+
+    cached_paths = []
+    for index, item in enumerate(fresh_objects, start=1):
+        key = item["Key"]
+        local_path = cached_image_local_path(temp_dir, key, index)
+        try:
+            s3_client.download_file(STORAGE_BUCKET, key, local_path)
+            cached_paths.append(local_path)
+        except Exception:
+            continue
+    return cached_paths
+
+
+def cache_sku_image(sku, source_path, source_identifier, index):
+    s3_client = get_s3_client()
+    if not s3_client or not os.path.isfile(source_path):
+        return
+
+    digest = sha1(source_identifier.encode("utf-8")).hexdigest()[:12]
+    key = f"{image_cache_prefix(sku)}{index:02d}-{digest}.jpg"
+    try:
+        s3_client.upload_file(source_path, STORAGE_BUCKET, key, ExtraArgs={"ContentType": "image/jpeg"})
+    except Exception:
+        pass
+
+
 def search_and_download_sku_images(dbx, sku, temp_dir):
+    cached = load_cached_sku_images(sku, temp_dir)
+    if cached:
+        return cached
+
     matches = []
     try:
         result = dbx.files_search_v2(
@@ -350,7 +427,9 @@ def search_and_download_sku_images(dbx, sku, temp_dir):
             local_path = os.path.join(temp_dir, file_info["name"])
             with open(local_path, "wb") as fp:
                 fp.write(response.content)
-            downloaded.append(prepare_image_for_pdf(local_path))
+            optimized_path = prepare_image_for_pdf(local_path)
+            downloaded.append(optimized_path)
+            cache_sku_image(sku, optimized_path, file_info["path"], len(downloaded))
         except Exception:
             continue
 
@@ -550,7 +629,9 @@ def cleanup_old_jobs():
     stale_jobs = CatalogJob.query.filter(CatalogJob.created_at < cutoff).all()
     for job in stale_jobs:
         file_path = job.file_path
+        storage_key = job.storage_key
         db.session.delete(job)
+        delete_storage_key(storage_key)
         if file_path:
             try:
                 os.remove(file_path)
@@ -558,6 +639,29 @@ def cleanup_old_jobs():
                 pass
     if stale_jobs:
         db.session.commit()
+    cleanup_old_image_cache()
+
+
+def cleanup_old_image_cache():
+    s3_client = get_s3_client()
+    if not s3_client:
+        return
+
+    cutoff = datetime.utcnow().timestamp() - IMAGE_CACHE_SECONDS
+    try:
+        paginator = s3_client.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=STORAGE_BUCKET, Prefix=image_cache_root_prefix())
+        for page in pages:
+            expired_keys = []
+            for item in page.get("Contents", []):
+                key = item.get("Key", "")
+                last_modified = item.get("LastModified")
+                if key and last_modified and last_modified.timestamp() < cutoff:
+                    expired_keys.append({"Key": key})
+            for index in range(0, len(expired_keys), 1000):
+                s3_client.delete_objects(Bucket=STORAGE_BUCKET, Delete={"Objects": expired_keys[index : index + 1000]})
+    except Exception:
+        pass
 
 
 def get_redis_client():
@@ -586,6 +690,18 @@ def upload_catalog_file(file_path, file_name):
     key = f"{STORAGE_PREFIX}/{file_name}" if STORAGE_PREFIX else file_name
     s3_client.upload_file(file_path, STORAGE_BUCKET, key, ExtraArgs={"ContentType": "application/pdf"})
     return key
+
+
+def delete_storage_key(key):
+    if not key:
+        return
+    s3_client = get_s3_client()
+    if not s3_client:
+        return
+    try:
+        s3_client.delete_object(Bucket=STORAGE_BUCKET, Key=key)
+    except Exception:
+        pass
 
 
 def open_catalog_file(job):
@@ -1024,6 +1140,7 @@ def public_assets(filename):
 
 def build_user_job_stats(users):
     user_ids = [user.id for user in users]
+    history_cutoff = datetime.utcnow() - timedelta(days=JOB_RETENTION_DAYS)
     stats = {
         user.id: {
             "total": 0,
@@ -1038,7 +1155,7 @@ def build_user_job_stats(users):
         return stats
 
     jobs = (
-        CatalogJob.query.filter(CatalogJob.user_id.in_(user_ids))
+        CatalogJob.query.filter(CatalogJob.user_id.in_(user_ids), CatalogJob.created_at >= history_cutoff)
         .order_by(CatalogJob.created_at.desc())
         .all()
     )
@@ -1072,13 +1189,21 @@ def can_change_admin_role_or_status(user, role, active):
 def admin_users():
     if not require_admin():
         return jsonify({"success": False, "error": "Admin access is required."}), 403
+    cleanup_old_jobs()
+    history_cutoff = datetime.utcnow() - timedelta(days=JOB_RETENTION_DAYS)
     users = User.query.order_by(User.created_at.desc()).all()
-    recent_jobs = CatalogJob.query.order_by(CatalogJob.created_at.desc()).limit(25).all()
+    recent_jobs = (
+        CatalogJob.query.filter(CatalogJob.created_at >= history_cutoff)
+        .order_by(CatalogJob.created_at.desc())
+        .limit(50)
+        .all()
+    )
     return render_template(
         "admin_users.html",
         users=users,
         user_stats=build_user_job_stats(users),
         recent_jobs=recent_jobs,
+        retention_days=JOB_RETENTION_DAYS,
     )
 
 
@@ -1180,8 +1305,15 @@ def admin_user_jobs(user_id):
         flash("User not found.", "error")
         return redirect(url_for("admin_users"))
 
-    jobs = CatalogJob.query.filter_by(user_id=user.id).order_by(CatalogJob.created_at.desc()).limit(100).all()
-    return render_template("admin_user_jobs.html", user=user, jobs=jobs)
+    cleanup_old_jobs()
+    history_cutoff = datetime.utcnow() - timedelta(days=JOB_RETENTION_DAYS)
+    jobs = (
+        CatalogJob.query.filter(CatalogJob.user_id == user.id, CatalogJob.created_at >= history_cutoff)
+        .order_by(CatalogJob.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    return render_template("admin_user_jobs.html", user=user, jobs=jobs, retention_days=JOB_RETENTION_DAYS)
 
 
 @app.get("/sample-template")
@@ -1276,9 +1408,12 @@ def download_catalog_job(job_id):
 @app.get("/api/jobs")
 @login_required
 def list_catalog_jobs():
+    cleanup_old_jobs()
+    history_cutoff = datetime.utcnow() - timedelta(days=JOB_RETENTION_DAYS)
     query = CatalogJob.query
     if not current_user.is_admin:
         query = query.filter_by(user_id=current_user.id)
+    query = query.filter(CatalogJob.created_at >= history_cutoff)
     jobs = query.order_by(CatalogJob.created_at.desc()).limit(25).all()
     return jsonify({"success": True, "jobs": [public_job(job) for job in jobs]})
 
