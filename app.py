@@ -192,10 +192,27 @@ def require_admin():
     return current_user.is_authenticated and current_user.is_admin
 
 
+def normalize_email(email):
+    return (email or "").strip().lower()
+
+
 def is_allowed_email(email):
     if not ALLOWED_EMAIL_DOMAIN:
         return True
     return email.strip().lower().endswith(f"@{ALLOWED_EMAIL_DOMAIN}")
+
+
+def is_safe_next_url(next_url):
+    return bool(next_url) and next_url.startswith("/") and not next_url.startswith("//")
+
+
+def format_datetime(value):
+    if not value:
+        return ""
+    return value.strftime("%d %b %Y, %I:%M %p")
+
+
+app.jinja_env.filters["datetime"] = format_datetime
 
 
 def clean_value(value):
@@ -622,10 +639,17 @@ def update_job(job_id, **changes):
 
 
 def public_job(job):
+    queued_seconds = 0
+    if job.status == "queued" and job.created_at:
+        queued_seconds = max(0, int((datetime.utcnow() - job.created_at).total_seconds()))
+    message = job.message or ""
+    if job.status == "queued" and queued_seconds >= 60:
+        message = "Still queued. If this stays here, the worker service or REDIS_URL may not be connected."
+
     payload = {
         "id": job.id,
         "status": job.status,
-        "message": job.message or "",
+        "message": message,
         "current": job.current or 0,
         "total": job.total or 0,
         "percent": job.percent or 0,
@@ -636,6 +660,9 @@ def public_job(job):
         "error": job.error or "",
         "stopRequested": bool(job.stop_requested),
         "isPartial": bool(job.partial),
+        "createdAt": format_datetime(job.created_at),
+        "updatedAt": format_datetime(job.updated_at),
+        "queuedSeconds": queued_seconds,
     }
     if job.status in {"complete", "partial_complete"}:
         payload["downloadUrl"] = f"/api/jobs/{job.id}/download"
@@ -906,20 +933,75 @@ def login():
 
 @app.post("/login")
 def login_post():
-    email = request.form.get("email", "").strip().lower()
+    email = normalize_email(request.form.get("email", ""))
     password = request.form.get("password", "")
     if not is_allowed_email(email):
         flash(f"Only @{ALLOWED_EMAIL_DOMAIN} email addresses can sign in.", "error")
         return render_template("login.html"), 403
 
     user = User.query.filter_by(email=email).first()
-    if not user or not user.active or not user.check_password(password):
+    if not user:
+        flash("No account found for this email. Please register first.", "error")
+        return render_template("login.html", email=email), 401
+    if not user.active:
+        flash("This account is inactive. Please contact admin.", "error")
+        return render_template("login.html", email=email), 403
+    if not user.check_password(password):
         flash("Invalid email or password.", "error")
-        return render_template("login.html"), 401
+        return render_template("login.html", email=email), 401
 
     login_user(user)
     next_url = request.args.get("next")
-    return redirect(next_url or url_for("index"))
+    return redirect(next_url if is_safe_next_url(next_url) else url_for("index"))
+
+
+@app.get("/register")
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for("index"))
+    return render_template("register.html")
+
+
+@app.post("/register")
+def register_post():
+    if current_user.is_authenticated:
+        return redirect(url_for("index"))
+
+    email = normalize_email(request.form.get("email", ""))
+    name = request.form.get("name", "").strip()
+    password = request.form.get("password", "")
+    confirm_password = request.form.get("confirm_password", "")
+
+    if not email or not password:
+        flash("Email and password are required.", "error")
+        return render_template("register.html", email=email, name=name), 400
+    if not is_allowed_email(email):
+        flash(f"Only @{ALLOWED_EMAIL_DOMAIN} email addresses can register.", "error")
+        return render_template("register.html", email=email, name=name), 403
+    if len(password) < 8:
+        flash("Password must be at least 8 characters.", "error")
+        return render_template("register.html", email=email, name=name), 400
+    if password != confirm_password:
+        flash("Passwords do not match.", "error")
+        return render_template("register.html", email=email, name=name), 400
+    if User.query.filter_by(email=email).first():
+        flash("This email is already registered. Please login.", "error")
+        return redirect(url_for("login"))
+
+    user = User(id=uuid.uuid4().hex, email=email, name=name or email, role="user", active=True)
+    user.set_password(password)
+    db.session.add(user)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("This email is already registered. Please login.", "error")
+        return redirect(url_for("login"))
+
+    login_user(user)
+    flash("Account created. You are logged in.", "success")
+    next_url = request.args.get("next")
+    return redirect(next_url if is_safe_next_url(next_url) else url_for("index"))
 
 
 @app.post("/logout")
@@ -940,13 +1022,64 @@ def public_assets(filename):
     return send_from_directory(os.path.join(PUBLIC_DIR, "assets"), filename)
 
 
+def build_user_job_stats(users):
+    user_ids = [user.id for user in users]
+    stats = {
+        user.id: {
+            "total": 0,
+            "active": 0,
+            "complete": 0,
+            "failed": 0,
+            "last_job": None,
+        }
+        for user in users
+    }
+    if not user_ids:
+        return stats
+
+    jobs = (
+        CatalogJob.query.filter(CatalogJob.user_id.in_(user_ids))
+        .order_by(CatalogJob.created_at.desc())
+        .all()
+    )
+    for job in jobs:
+        item = stats.get(job.user_id)
+        if not item:
+            continue
+        item["total"] += 1
+        if job.status in {"queued", "running", "stopping"}:
+            item["active"] += 1
+        if job.status in {"complete", "partial_complete"}:
+            item["complete"] += 1
+        if job.status in {"failed", "cancelled"}:
+            item["failed"] += 1
+        if item["last_job"] is None:
+            item["last_job"] = job
+    return stats
+
+
+def can_change_admin_role_or_status(user, role, active):
+    if user.id == current_user.id and (role != "admin" or not active):
+        return False
+    admin_count = User.query.filter_by(role="admin", active=True).count()
+    if user.is_admin and user.active and admin_count <= 1 and (role != "admin" or not active):
+        return False
+    return True
+
+
 @app.get("/admin/users")
 @login_required
 def admin_users():
     if not require_admin():
         return jsonify({"success": False, "error": "Admin access is required."}), 403
     users = User.query.order_by(User.created_at.desc()).all()
-    return render_template("admin_users.html", users=users)
+    recent_jobs = CatalogJob.query.order_by(CatalogJob.created_at.desc()).limit(25).all()
+    return render_template(
+        "admin_users.html",
+        users=users,
+        user_stats=build_user_job_stats(users),
+        recent_jobs=recent_jobs,
+    )
 
 
 @app.post("/admin/users")
@@ -955,7 +1088,7 @@ def create_user():
     if not require_admin():
         return jsonify({"success": False, "error": "Admin access is required."}), 403
 
-    email = request.form.get("email", "").strip().lower()
+    email = normalize_email(request.form.get("email", ""))
     name = request.form.get("name", "").strip()
     password = request.form.get("password", "")
     role = request.form.get("role", "user").strip()
@@ -963,6 +1096,9 @@ def create_user():
         role = "user"
     if not email or not password:
         flash("Email and password are required.", "error")
+        return redirect(url_for("admin_users"))
+    if len(password) < 8:
+        flash("Password must be at least 8 characters.", "error")
         return redirect(url_for("admin_users"))
     if not is_allowed_email(email):
         flash(f"Only @{ALLOWED_EMAIL_DOMAIN} email addresses are allowed.", "error")
@@ -977,6 +1113,75 @@ def create_user():
     db.session.commit()
     flash("User created.", "success")
     return redirect(url_for("admin_users"))
+
+
+@app.post("/admin/users/<user_id>")
+@login_required
+def update_user(user_id):
+    if not require_admin():
+        return jsonify({"success": False, "error": "Admin access is required."}), 403
+
+    user = db.session.get(User, user_id)
+    if not user:
+        flash("User not found.", "error")
+        return redirect(url_for("admin_users"))
+
+    email = normalize_email(request.form.get("email", ""))
+    name = request.form.get("name", "").strip()
+    password = request.form.get("password", "")
+    role = request.form.get("role", "user").strip()
+    active = request.form.get("active") == "1"
+
+    if role not in {"user", "admin"}:
+        role = "user"
+    if not email:
+        flash("Email is required.", "error")
+        return redirect(url_for("admin_users"))
+    if not is_allowed_email(email):
+        flash(f"Only @{ALLOWED_EMAIL_DOMAIN} email addresses are allowed.", "error")
+        return redirect(url_for("admin_users"))
+    existing = User.query.filter(User.email == email, User.id != user.id).first()
+    if existing:
+        flash("Another user already has this email.", "error")
+        return redirect(url_for("admin_users"))
+    if not can_change_admin_role_or_status(user, role, active):
+        flash("You cannot remove the last active admin or deactivate your own admin account.", "error")
+        return redirect(url_for("admin_users"))
+    if password and len(password) < 8:
+        flash("New password must be at least 8 characters.", "error")
+        return redirect(url_for("admin_users"))
+
+    user.email = email
+    user.name = name or email
+    user.role = role
+    user.active = active
+    if password:
+        user.set_password(password)
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("Another user already has this email.", "error")
+        return redirect(url_for("admin_users"))
+
+    flash("User updated.", "success")
+    return redirect(url_for("admin_users"))
+
+
+@app.get("/admin/users/<user_id>/jobs")
+@login_required
+def admin_user_jobs(user_id):
+    if not require_admin():
+        return jsonify({"success": False, "error": "Admin access is required."}), 403
+
+    user = db.session.get(User, user_id)
+    if not user:
+        flash("User not found.", "error")
+        return redirect(url_for("admin_users"))
+
+    jobs = CatalogJob.query.filter_by(user_id=user.id).order_by(CatalogJob.created_at.desc()).limit(100).all()
+    return render_template("admin_user_jobs.html", user=user, jobs=jobs)
 
 
 @app.get("/sample-template")
