@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ user.email }} Jobs - Catalog Maker</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="/assets/bagzonelogo.jpg" alt="Bagzone logo">
+          <div>
+            <p class="eyebrow">Admin Jobs</p>
+            <h1>{{ user.name }}</h1>
+          </div>
+        </div>
+        <nav class="top-actions" aria-label="Account actions">
+          <a class="sample-link" href="/admin/users">Users</a>
+          <a class="sample-link" href="/">Catalog Maker</a>
+          <form method="post" action="/logout">
+            <button class="sample-link logout-link" type="submit">Logout</button>
+          </form>
+        </nav>
+      </header>
+
+      <section class="admin-panel recent-jobs-panel">
+        <div class="detail-head">
+          <div>
+            <p class="eyebrow">{{ user.email }}</p>
+            <h2>Job History</h2>
+          </div>
+          <span class="status-pill">{{ "Active" if user.active else "Inactive" }} {{ user.role }}</span>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Job ID</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>SKU</th>
+                <th>Message / Error</th>
+                <th>Summary</th>
+                <th>Created</th>
+                <th>Updated</th>
+                <th>File</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for job in jobs %}
+                <tr>
+                  <td>{{ job.id[:8] }}</td>
+                  <td>{{ job.status }}</td>
+                  <td>{{ job.current }} / {{ job.total }} ({{ job.percent }}%)</td>
+                  <td>{{ job.sku or "-" }}</td>
+                  <td>{{ job.error or job.message }}</td>
+                  <td>
+                    {% if job.summary %}
+                      {{ job.summary.pages }} pages, {{ job.summary.imagesFetched }} images, {{ job.summary.missingImages }} missing
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td>{{ job.created_at|datetime }}</td>
+                  <td>{{ job.updated_at|datetime }}</td>
+                  <td>
+                    {% if job.status in ["complete", "partial_complete"] %}
+                      <a href="/api/jobs/{{ job.id }}/download">Download</a>
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="9">This user has not uploaded any SKU sheets yet.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
