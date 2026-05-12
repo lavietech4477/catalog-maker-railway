@@ -33,6 +33,7 @@
           </div>
           <span class="status-pill">{{ "Active" if user.active else "Inactive" }} {{ user.role }}</span>
         </div>
+        <p class="panel-note">Showing jobs from the last {{ retention_days }} days. Older PDFs and job records are cleaned up automatically.</p>
 
         <div class="table-wrap">
           <table>
