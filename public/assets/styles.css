@@ -93,6 +93,7 @@ h1 {
 
 .sample-link,
 .primary-btn,
+.secondary-btn,
 .download-btn,
 .stop-btn {
   display: inline-flex;
@@ -116,6 +117,7 @@ h1 {
 
 .sample-link:hover,
 .primary-btn:hover,
+.secondary-btn:hover,
 .download-btn:hover,
 .stop-btn:hover {
   transform: translate(2px, 2px);
@@ -459,6 +461,25 @@ td:nth-child(3) {
   background: #ffd8d8;
 }
 
+.flash.success {
+  background: #d7ffd8;
+}
+
+.page-flashes {
+  margin: 24px 0 0;
+}
+
+.auth-switch {
+  margin: 4px 0 0;
+  font-weight: 900;
+}
+
+.auth-switch a,
+td a {
+  color: var(--ink);
+  font-weight: 900;
+}
+
 .admin-grid {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
@@ -468,6 +489,92 @@ td:nth-child(3) {
 
 .admin-panel h2 {
   font-size: 1.25rem;
+}
+
+.admin-user-list {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-user-card {
+  border: var(--line);
+  background: var(--paper);
+  padding: 14px;
+}
+
+.admin-user-card form {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-user-head,
+.admin-user-foot,
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-user-head strong,
+.admin-user-head span,
+.admin-user-foot span {
+  display: block;
+}
+
+.admin-user-head strong {
+  font-size: 1.05rem;
+}
+
+.admin-user-head span,
+.admin-user-foot {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.admin-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-metrics span,
+.status-pill,
+.mini-link {
+  border: 2px solid var(--ink);
+  background: var(--white);
+  padding: 7px 8px;
+  font-weight: 900;
+  text-align: center;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.admin-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
+.secondary-btn {
+  width: 100%;
+  min-height: 48px;
+  background: var(--white);
+}
+
+.recent-jobs-panel {
+  margin-top: 24px;
+}
+
+.recent-jobs-panel td {
+  max-width: 360px;
+  vertical-align: top;
 }
 
 @media (max-width: 820px) {
@@ -509,6 +616,11 @@ td:nth-child(3) {
   .admin-grid {
     grid-template-columns: 1fr;
   }
+
+  .admin-metrics,
+  .admin-edit-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 520px) {
@@ -519,5 +631,10 @@ td:nth-child(3) {
   .brand img {
     width: 56px;
     height: 42px;
+  }
+
+  .admin-metrics,
+  .admin-edit-grid {
+    grid-template-columns: 1fr;
   }
 }
