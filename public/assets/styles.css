@@ -136,7 +136,8 @@ h1 {
 .hero-copy,
 .upload-panel,
 .status-card,
-.result-card {
+.result-card,
+.activity-panel {
   border: var(--line);
   background: var(--white);
   box-shadow: var(--shadow);
@@ -286,7 +287,8 @@ h1 {
   }
 }
 
-.result-card {
+.result-card,
+.activity-panel {
   margin-top: 28px;
   padding: 22px;
 }
