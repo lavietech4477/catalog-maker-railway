@@ -14,6 +14,7 @@ const downloadLogBtn = document.querySelector("#download-log-btn");
 const stopBtn = document.querySelector("#stop-btn");
 const resultTitle = document.querySelector("#result-title");
 const reportBody = document.querySelector("#report-body");
+const activityBody = document.querySelector("#activity-body");
 
 let currentDownloadUrl = "";
 let currentFileName = "Catalog.pdf";
@@ -65,6 +66,7 @@ form.addEventListener("submit", async (event) => {
 
     currentJobId = payload.job.id;
     handleJob(payload.job);
+    loadActivity();
     pollJob(currentJobId);
   } catch (error) {
     showStatus("Catalog not generated", error.message, true);
@@ -168,6 +170,7 @@ function handleJob(job) {
     showStatus("Catalog not generated", job.error || "Catalog generation failed.", true);
     generateBtn.disabled = false;
     stopBtn.classList.add("hidden");
+    loadActivity();
     return;
   }
 
@@ -176,6 +179,7 @@ function handleJob(job) {
     showStatus("Catalog stopped", job.message || "No catalog pages were created.", true);
     generateBtn.disabled = false;
     stopBtn.classList.add("hidden");
+    loadActivity();
     return;
   }
 
@@ -185,6 +189,7 @@ function handleJob(job) {
     generateBtn.disabled = false;
     stopBtn.classList.add("hidden");
     renderResult(job);
+    loadActivity();
   }
 }
 
@@ -249,6 +254,45 @@ function renderResult(job) {
   });
 
   resultCard.classList.remove("hidden");
+}
+
+async function loadActivity() {
+  if (!activityBody) return;
+
+  try {
+    const response = await fetch("/api/jobs", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) return;
+    renderActivity(payload.jobs || []);
+  } catch (_error) {
+    // Activity is supplemental; keep generation flow quiet if refresh fails.
+  }
+}
+
+function renderActivity(jobs) {
+  activityBody.innerHTML = "";
+  if (!jobs.length) {
+    activityBody.innerHTML = '<tr><td colspan="6">No activity yet.</td></tr>';
+    return;
+  }
+
+  jobs.forEach((job) => {
+    const tr = document.createElement("tr");
+    const progress = `${Number(job.current) || 0} / ${Number(job.total) || 0} (${Number(job.percent) || 0}%)`;
+    const message = job.error || job.message || "-";
+    const file = job.downloadUrl
+      ? `<a href="${escapeHtml(job.downloadUrl)}">Download PDF</a>`
+      : "-";
+    tr.innerHTML = `
+      <td>${escapeHtml(job.createdAt || "-")}</td>
+      <td>${escapeHtml(job.status || "-")}</td>
+      <td>${escapeHtml(progress)}</td>
+      <td>${escapeHtml(message)}</td>
+      <td>${escapeHtml(job.updatedAt || "-")}</td>
+      <td>${file}</td>
+    `;
+    activityBody.appendChild(tr);
+  });
 }
 
 function isFailedLogRow(row) {
