@@ -61,6 +61,7 @@
 
         <section class="admin-panel">
           <h2>Existing Users</h2>
+          <p class="panel-note">Job stats show the last {{ retention_days }} days.</p>
           <div class="admin-user-list">
             {% for user in users %}
               {% set stats = user_stats[user.id] %}
@@ -129,6 +130,7 @@
 
       <section class="admin-panel recent-jobs-panel">
         <h2>Recent Jobs</h2>
+        <p class="panel-note">Only jobs from the last {{ retention_days }} days are kept here. Older PDFs are deleted automatically.</p>
         <div class="table-wrap">
           <table>
             <thead>
