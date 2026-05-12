@@ -65,6 +65,7 @@ STORAGE_REGION = os.getenv("STORAGE_REGION", "auto")
 ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "bagzone.in").strip().lower()
 JOB_RETENTION_DAYS = max(1, int(os.getenv("JOB_RETENTION_DAYS", "10")))
 IMAGE_CACHE_DAYS = max(1, int(os.getenv("IMAGE_CACHE_DAYS", "30")))
+USER_ACTIVITY_LIMIT = max(1, int(os.getenv("USER_ACTIVITY_LIMIT", "5")))
 SHEET_NAME = "Master"
 HEADER_ROW_INDEX = 1
 SKU_COLUMN_NAME = "Article"
@@ -628,18 +629,33 @@ def cleanup_old_jobs():
     cutoff = datetime.utcnow() - timedelta(seconds=JOB_TTL_SECONDS)
     stale_jobs = CatalogJob.query.filter(CatalogJob.created_at < cutoff).all()
     for job in stale_jobs:
-        file_path = job.file_path
-        storage_key = job.storage_key
+        delete_job_artifacts(job)
         db.session.delete(job)
-        delete_storage_key(storage_key)
-        if file_path:
-            try:
-                os.remove(file_path)
-            except OSError:
-                pass
     if stale_jobs:
         db.session.commit()
     cleanup_old_image_cache()
+
+
+def cleanup_user_activity_stack(user_id):
+    jobs = (
+        CatalogJob.query.filter_by(user_id=user_id)
+        .order_by(CatalogJob.created_at.desc())
+        .all()
+    )
+    overflow = jobs[USER_ACTIVITY_LIMIT:]
+    terminal_statuses = {"complete", "partial_complete", "failed", "cancelled"}
+    stale_jobs = [job for job in overflow if job.status in terminal_statuses]
+    for job in stale_jobs:
+        delete_job_artifacts(job)
+        db.session.delete(job)
+    if stale_jobs:
+        db.session.commit()
+
+
+def cleanup_all_user_activity_stacks():
+    user_ids = [row[0] for row in db.session.query(User.id).all()]
+    for user_id in user_ids:
+        cleanup_user_activity_stack(user_id)
 
 
 def cleanup_old_image_cache():
@@ -704,6 +720,17 @@ def delete_storage_key(key):
         pass
 
 
+def delete_job_artifacts(job):
+    if not job:
+        return
+    delete_storage_key(job.storage_key)
+    if job.file_path:
+        try:
+            os.remove(job.file_path)
+        except OSError:
+            pass
+
+
 def open_catalog_file(job):
     if job.storage_key:
         s3_client = get_s3_client()
@@ -751,7 +778,10 @@ def update_job(job_id, **changes):
     for key, value in changes.items():
         setattr(job, key, value)
     job.updated_at = datetime.utcnow()
+    user_id = job.user_id
     db.session.commit()
+    if changes.get("status") in {"complete", "partial_complete", "failed", "cancelled"}:
+        cleanup_user_activity_stack(user_id)
 
 
 def public_job(job):
@@ -826,6 +856,7 @@ def create_job(user_id, sku_list, stock_lookup):
     )
     db.session.add(job)
     db.session.commit()
+    cleanup_user_activity_stack(user_id)
     enqueue_job(job.id)
     return job
 
@@ -1130,7 +1161,15 @@ def logout():
 @app.get("/")
 @login_required
 def index():
-    return render_template("index.html")
+    cleanup_old_jobs()
+    cleanup_user_activity_stack(current_user.id)
+    recent_jobs = (
+        CatalogJob.query.filter_by(user_id=current_user.id)
+        .order_by(CatalogJob.created_at.desc())
+        .limit(USER_ACTIVITY_LIMIT)
+        .all()
+    )
+    return render_template("index.html", recent_jobs=recent_jobs, activity_limit=USER_ACTIVITY_LIMIT)
 
 
 @app.get("/assets/<path:filename>")
@@ -1190,6 +1229,7 @@ def admin_users():
     if not require_admin():
         return jsonify({"success": False, "error": "Admin access is required."}), 403
     cleanup_old_jobs()
+    cleanup_all_user_activity_stacks()
     history_cutoff = datetime.utcnow() - timedelta(days=JOB_RETENTION_DAYS)
     users = User.query.order_by(User.created_at.desc()).all()
     recent_jobs = (
@@ -1204,6 +1244,7 @@ def admin_users():
         user_stats=build_user_job_stats(users),
         recent_jobs=recent_jobs,
         retention_days=JOB_RETENTION_DAYS,
+        activity_limit=USER_ACTIVITY_LIMIT,
     )
 
 
@@ -1307,13 +1348,20 @@ def admin_user_jobs(user_id):
 
     cleanup_old_jobs()
     history_cutoff = datetime.utcnow() - timedelta(days=JOB_RETENTION_DAYS)
+    cleanup_user_activity_stack(user.id)
     jobs = (
         CatalogJob.query.filter(CatalogJob.user_id == user.id, CatalogJob.created_at >= history_cutoff)
         .order_by(CatalogJob.created_at.desc())
-        .limit(100)
+        .limit(USER_ACTIVITY_LIMIT)
         .all()
     )
-    return render_template("admin_user_jobs.html", user=user, jobs=jobs, retention_days=JOB_RETENTION_DAYS)
+    return render_template(
+        "admin_user_jobs.html",
+        user=user,
+        jobs=jobs,
+        retention_days=JOB_RETENTION_DAYS,
+        activity_limit=USER_ACTIVITY_LIMIT,
+    )
 
 
 @app.get("/sample-template")
@@ -1409,12 +1457,14 @@ def download_catalog_job(job_id):
 @login_required
 def list_catalog_jobs():
     cleanup_old_jobs()
+    if not current_user.is_admin:
+        cleanup_user_activity_stack(current_user.id)
     history_cutoff = datetime.utcnow() - timedelta(days=JOB_RETENTION_DAYS)
     query = CatalogJob.query
     if not current_user.is_admin:
         query = query.filter_by(user_id=current_user.id)
     query = query.filter(CatalogJob.created_at >= history_cutoff)
-    jobs = query.order_by(CatalogJob.created_at.desc()).limit(25).all()
+    jobs = query.order_by(CatalogJob.created_at.desc()).limit(USER_ACTIVITY_LIMIT if not current_user.is_admin else 25).all()
     return jsonify({"success": True, "jobs": [public_job(job) for job in jobs]})
 
 
