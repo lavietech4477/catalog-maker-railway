@@ -67,8 +67,15 @@
         </section>
 
         <section class="admin-panel users-panel">
-          <h2>Existing Users</h2>
-          <p class="panel-note">Job stats show the last {{ retention_days }} days.</p>
+          <div class="panel-heading">
+            <div>
+              <h2>Existing Users</h2>
+              <p class="panel-note">Job stats show the last {{ retention_days }} days.</p>
+            </div>
+            <form method="post" action="/admin/cleanup-load-test-users" onsubmit="return confirm('Delete all load test users and their jobs?');">
+              <button class="secondary-btn danger-btn" type="submit">Delete Test Users</button>
+            </form>
+          </div>
           <div class="admin-user-list">
             {% for user in users %}
               {% set stats = user_stats[user.id] %}
