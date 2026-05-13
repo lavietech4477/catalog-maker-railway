@@ -658,6 +658,14 @@ def cleanup_all_user_activity_stacks():
         cleanup_user_activity_stack(user_id)
 
 
+def delete_user_with_jobs(user):
+    jobs = CatalogJob.query.filter_by(user_id=user.id).all()
+    for job in jobs:
+        delete_job_artifacts(job)
+        db.session.delete(job)
+    db.session.delete(user)
+
+
 def cleanup_old_image_cache():
     s3_client = get_s3_client()
     if not s3_client:
@@ -1332,6 +1340,29 @@ def update_user(user_id):
         return redirect(url_for("admin_users"))
 
     flash("User updated.", "success")
+    return redirect(url_for("admin_users"))
+
+
+@app.post("/admin/cleanup-load-test-users")
+@login_required
+def cleanup_load_test_users():
+    if not require_admin():
+        return jsonify({"success": False, "error": "Admin access is required."}), 403
+
+    test_users = (
+        User.query.filter(User.email.like("loadtest-%@bagzone.in"))
+        .order_by(User.created_at.desc())
+        .all()
+    )
+    deleted_count = 0
+    for user in test_users:
+        if user.id == current_user.id:
+            continue
+        delete_user_with_jobs(user)
+        deleted_count += 1
+
+    db.session.commit()
+    flash(f"Deleted {deleted_count} load test users and their jobs.", "success")
     return redirect(url_for("admin_users"))
 
 
