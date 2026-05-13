@@ -66,6 +66,8 @@ ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "bagzone.in").strip().l
 JOB_RETENTION_DAYS = max(1, int(os.getenv("JOB_RETENTION_DAYS", "10")))
 IMAGE_CACHE_DAYS = max(1, int(os.getenv("IMAGE_CACHE_DAYS", "30")))
 USER_ACTIVITY_LIMIT = max(1, int(os.getenv("USER_ACTIVITY_LIMIT", "5")))
+DISPLAY_TIMEZONE_OFFSET_MINUTES = int(os.getenv("DISPLAY_TIMEZONE_OFFSET_MINUTES", "330"))
+DISPLAY_TIMEZONE_LABEL = os.getenv("DISPLAY_TIMEZONE_LABEL", "IST").strip()
 SHEET_NAME = "Master"
 HEADER_ROW_INDEX = 1
 SKU_COLUMN_NAME = "Article"
@@ -215,7 +217,9 @@ def is_safe_next_url(next_url):
 def format_datetime(value):
     if not value:
         return ""
-    return value.strftime("%d %b %Y, %I:%M %p")
+    display_value = value + timedelta(minutes=DISPLAY_TIMEZONE_OFFSET_MINUTES)
+    formatted = display_value.strftime("%d %b %Y, %I:%M %p")
+    return f"{formatted} {DISPLAY_TIMEZONE_LABEL}" if DISPLAY_TIMEZONE_LABEL else formatted
 
 
 app.jinja_env.filters["datetime"] = format_datetime
