@@ -658,6 +658,12 @@ td a {
   background: var(--white);
 }
 
+.danger-btn {
+  width: auto;
+  min-height: 42px;
+  background: #ffd8d8;
+}
+
 .recent-jobs-panel {
   margin-top: 24px;
 }
