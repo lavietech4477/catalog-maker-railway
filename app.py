@@ -560,7 +560,7 @@ class CatalogPDF(FPDF):
         self.set_font("Helvetica", "", 6.5)
         self.set_text_color(80, 80, 80)
         self.set_xy(39, 650)
-        self.cell(0, 10, "Propriety: Bagzone Lifestyle Pvt. Ltd.")
+        self.cell(0, 10, "Propriety: Bagzone Lifestyles Pvt. Ltd.")
 
         self.set_draw_color(255, 204, 0)
         self.set_line_width(1.2)
