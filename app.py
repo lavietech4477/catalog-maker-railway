@@ -11,6 +11,7 @@ import uuid
 from hashlib import sha1
 from datetime import datetime, timedelta
 from functools import lru_cache
+from numbers import Number
 
 import boto3
 import dropbox
@@ -86,9 +87,10 @@ CATALOG_FIELDS = [
     ("Size", "Size"),
     ("Stock", "Stock"),
     ("RRP", "RRP"),
+    ("Customer Discount", "Customer Discount"),
     ("NEW MRP", "MRP"),
 ]
-OPTIONAL_UPLOAD_FIELDS = {"Stock", "RRP"}
+OPTIONAL_UPLOAD_FIELDS = {"Stock", "RRP", "Customer Discount"}
 MISSING_UPLOAD_VALUES = {"", "NA", "N/A", "NAN"}
 
 
@@ -260,6 +262,23 @@ def format_upload_value(value):
     return str(value).strip()
 
 
+
+def format_customer_discount_value(value):
+    if is_missing_upload_value(value):
+        return ""
+    if isinstance(value, Number) and not isinstance(value, bool):
+        discount_number = float(value)
+        if discount_number and abs(discount_number) < 1:
+            discount_number *= 100
+        if discount_number == int(discount_number):
+            discount_value = str(int(discount_number))
+        else:
+            discount_value = f"{discount_number:.10f}".rstrip("0").rstrip(".")
+    else:
+        discount_value = format_upload_value(value)
+    discount_value = re.sub(r"\s+", " ", discount_value.replace("%", "")).strip()
+    return f"{discount_value} %" if discount_value else ""
+    
 
 def excel_date_to_str(value):
     if isinstance(value, (int, float)):
@@ -532,7 +551,12 @@ class CatalogPDF(FPDF):
             if gs1_key in OPTIONAL_UPLOAD_FIELDS:
                 if is_missing_upload_value(value):
                     continue
-                value = format_upload_value(value)
+                if gs1_key == "Customer Discount":
+                    value = format_customer_discount_value(value)
+                else:
+                    value = format_upload_value(value)
+                if not value:
+                    continue
             else:
                 value = value or "N/A"
             visible_fields.append((display_label, value))
@@ -623,6 +647,14 @@ def parse_uploaded_file(uploaded_file):
     if df.empty:
         raise ValueError("Uploaded file has no rows.")
 
+    def find_uploaded_column(candidates):
+        candidate_keys = {re.sub(r"[^a-z0-9]+", "", candidate.lower()) for candidate in candidates}
+        for column in df.columns:
+            column_key = re.sub(r"[^a-z0-9]+", "", str(column).lower())
+            if column_key in candidate_keys:
+                return column
+        return None
+
     sku_col = next(
         (candidate for candidate in ["SKU", "sku", "Article", "article", "ARTICLE", "Item Id", "item_id", "ItemId"] if candidate in df.columns),
         df.columns[0],
@@ -635,15 +667,18 @@ def parse_uploaded_file(uploaded_file):
         (candidate for candidate in ["RRP", "rrp", "Rrp"] if candidate in df.columns),
         None,
     )
-    if stock_col == rrp_col:
+    customer_discount_col = find_uploaded_column(
+        ["Customer Discount", "CustomerDiscount", "Customer_Discount", "Customer-Discount", "Cust Discount", "Discount"]
+    )
+    if stock_col in {rrp_col, customer_discount_col}:
         stock_col = None
 
     sku_list = df[sku_col].dropna().astype(str).str.strip().tolist()
     sku_list = [sku for sku in sku_list if sku]
     if not sku_list:
         raise ValueError("No SKU values found in the uploaded file.")
-
-    def build_optional_lookup(value_col):
+    
+    def build_optional_lookup(value_col, formatter=format_upload_value):
         lookup = {}
         if value_col is None:
             return lookup
@@ -651,15 +686,16 @@ def parse_uploaded_file(uploaded_file):
             sku_val = str(row[sku_col]).strip().upper()
             if not sku_val or sku_val == "NAN":
                 continue
-            upload_value = format_upload_value(row.get(value_col, "N/A"))
+            upload_value = formatter(row.get(value_col, "N/A"))
             if upload_value:
                 lookup[sku_val] = upload_value
         return lookup
 
     stock_lookup = build_optional_lookup(stock_col)
     rrp_lookup = build_optional_lookup(rrp_col)
-
-    return df, sku_list, stock_lookup, rrp_lookup
+    customer_discount_lookup = build_optional_lookup(customer_discount_col, format_customer_discount_value)
+    
+    return df, sku_list, stock_lookup, rrp_lookup, customer_discount_lookup
 
 
 def pdf_to_bytes(pdf):
@@ -886,7 +922,7 @@ def is_stop_requested(job_id):
     return bool(job and job.stop_requested)
 
 
-def create_job(user_id, sku_list, stock_lookup, rrp_lookup=None):
+def create_job(user_id, sku_list, stock_lookup, rrp_lookup=None, customer_discount_lookup=None):
     cleanup_old_jobs()
     job_id = uuid.uuid4().hex
     job = CatalogJob(
@@ -906,7 +942,12 @@ def create_job(user_id, sku_list, stock_lookup, rrp_lookup=None):
         partial=False,
         summary=None,
         rows=[],
-        payload={"sku_list": sku_list, "stock_lookup": stock_lookup, "rrp_lookup": rrp_lookup or {}},
+        payload={
+            "sku_list": sku_list,
+            "stock_lookup": stock_lookup,
+            "rrp_lookup": rrp_lookup or {},
+            "customer_discount_lookup": customer_discount_lookup or {},
+        },
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -1039,7 +1080,7 @@ def finalize_catalog_job(job_id, pdf, results_summary, total_skus, partial=False
     )
 
 
-def generate_catalog_file(job_id, sku_list=None, stock_lookup=None, rrp_lookup=None):
+def generate_catalog_file(job_id, sku_list=None, stock_lookup=None, rrp_lookup=None, customer_discount_lookup=None):
     if sku_list is None or stock_lookup is None:
         job = get_job(job_id)
         if not job:
@@ -1051,8 +1092,12 @@ def generate_catalog_file(job_id, sku_list=None, stock_lookup=None, rrp_lookup=N
             stock_lookup = payload.get("stock_lookup", {})
         if rrp_lookup is None:
             rrp_lookup = payload.get("rrp_lookup", {})
+        if customer_discount_lookup is None:
+            customer_discount_lookup = payload.get("customer_discount_lookup", {})
     elif rrp_lookup is None:
         rrp_lookup = {}
+    if customer_discount_lookup is None:
+        customer_discount_lookup = {}
 
     update_job(job_id, status="running", message="Loading GS1 data.", total=len(sku_list))
     sku_lookup, _headers = load_gs1_master(GS1_FILE)
@@ -1091,6 +1136,7 @@ def generate_catalog_file(job_id, sku_list=None, stock_lookup=None, rrp_lookup=N
 
             info["Stock"] = stock_lookup.get(sku_upper, "N/A")
             info["RRP"] = rrp_lookup.get(sku_upper, "N/A")
+            info["Customer Discount"] = customer_discount_lookup.get(sku_upper, "N/A")
             images = search_and_download_sku_images(dbx, sku_upper, temp_dir)
             pdf.add_sku_page(info, images)
 
@@ -1458,6 +1504,7 @@ def sample_template():
             "SKU": pd.Series(dtype="str"),
             "Stock": pd.Series(dtype="int"),
             "RRP": pd.Series(dtype="int"),
+            "Customer Discount": pd.Series(dtype="str"),
         }
     )
     sample_buffer = io.BytesIO()
@@ -1479,11 +1526,11 @@ def start_catalog_job():
         return jsonify({"success": False, "error": "Please upload a CSV or XLSX file."}), 400
 
     try:
-        _df, sku_list, stock_lookup, rrp_lookup = parse_uploaded_file(uploaded_file)
+        _df, sku_list, stock_lookup, rrp_lookup, customer_discount_lookup = parse_uploaded_file(uploaded_file)
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 
-    job = create_job(current_user.id, sku_list, stock_lookup, rrp_lookup)
+    job = create_job(current_user.id, sku_list, stock_lookup, rrp_lookup, customer_discount_lookup)
     return jsonify({"success": True, "job": public_job(job)}), 202
 
 
