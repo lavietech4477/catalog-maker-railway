@@ -87,10 +87,11 @@ CATALOG_FIELDS = [
     ("Size", "Size"),
     ("Stock", "Stock"),
     ("RRP", "RRP"),
+    ("MAP", "MAP"),
     ("Customer Discount", "Customer Discount"),
     ("NEW MRP", "MRP"),
 ]
-OPTIONAL_UPLOAD_FIELDS = {"Stock", "RRP", "Customer Discount"}
+OPTIONAL_UPLOAD_FIELDS = {"Stock", "RRP","MAP", "Customer Discount"}
 MISSING_UPLOAD_VALUES = {"", "NA", "N/A", "NAN"}
 
 
@@ -667,10 +668,14 @@ def parse_uploaded_file(uploaded_file):
         (candidate for candidate in ["RRP", "rrp", "Rrp"] if candidate in df.columns),
         None,
     )
+    map_col = find_uploaded_column(["MAP"])
     customer_discount_col = find_uploaded_column(
         ["Customer Discount", "CustomerDiscount", "Customer_Discount", "Customer-Discount", "Cust Discount", "Discount"]
     )
-    if stock_col in {rrp_col, customer_discount_col}:
+    customer_discount_col = find_uploaded_column(
+        ["Customer Discount", "CustomerDiscount", "Customer_Discount", "Customer-Discount", "Cust Discount", "Discount"]
+    )
+    if stock_col in {rrp_col, map_col, customer_discount_col}:
         stock_col = None
 
     sku_list = df[sku_col].dropna().astype(str).str.strip().tolist()
@@ -693,6 +698,7 @@ def parse_uploaded_file(uploaded_file):
 
     stock_lookup = build_optional_lookup(stock_col)
     rrp_lookup = build_optional_lookup(rrp_col)
+    map_lookup = build_optional_lookup(map_col)
     customer_discount_lookup = build_optional_lookup(customer_discount_col, format_customer_discount_value)
     
     return df, sku_list, stock_lookup, rrp_lookup, customer_discount_lookup
@@ -946,6 +952,7 @@ def create_job(user_id, sku_list, stock_lookup, rrp_lookup=None, customer_discou
             "sku_list": sku_list,
             "stock_lookup": stock_lookup,
             "rrp_lookup": rrp_lookup or {},
+            "map_lookup": map_lookup or {},
             "customer_discount_lookup": customer_discount_lookup or {},
         },
         created_at=datetime.utcnow(),
@@ -1136,6 +1143,7 @@ def generate_catalog_file(job_id, sku_list=None, stock_lookup=None, rrp_lookup=N
 
             info["Stock"] = stock_lookup.get(sku_upper, "N/A")
             info["RRP"] = rrp_lookup.get(sku_upper, "N/A")
+            info["MAP"] = map_lookup.get(sku_upper, "N/A")
             info["Customer Discount"] = customer_discount_lookup.get(sku_upper, "N/A")
             images = search_and_download_sku_images(dbx, sku_upper, temp_dir)
             pdf.add_sku_page(info, images)
@@ -1504,6 +1512,7 @@ def sample_template():
             "SKU": pd.Series(dtype="str"),
             "Stock": pd.Series(dtype="int"),
             "RRP": pd.Series(dtype="int"),
+            "MAP": pd.Series(dtype="int"),
             "Customer Discount": pd.Series(dtype="str"),
         }
     )
