@@ -701,7 +701,7 @@ def parse_uploaded_file(uploaded_file):
     map_lookup = build_optional_lookup(map_col)
     customer_discount_lookup = build_optional_lookup(customer_discount_col, format_customer_discount_value)
     
-    return df, sku_list, stock_lookup, rrp_lookup, customer_discount_lookup
+    return df, sku_list, stock_lookup, rrp_lookup, map_lookup, customer_discount_lookup
 
 
 def pdf_to_bytes(pdf):
@@ -928,7 +928,7 @@ def is_stop_requested(job_id):
     return bool(job and job.stop_requested)
 
 
-def create_job(user_id, sku_list, stock_lookup, rrp_lookup=None, customer_discount_lookup=None):
+def create_job(user_id, sku_list, stock_lookup, rrp_lookup=None, map_lookup=None, customer_discount_lookup=None):
     cleanup_old_jobs()
     job_id = uuid.uuid4().hex
     job = CatalogJob(
@@ -1087,7 +1087,7 @@ def finalize_catalog_job(job_id, pdf, results_summary, total_skus, partial=False
     )
 
 
-def generate_catalog_file(job_id, sku_list=None, stock_lookup=None, rrp_lookup=None, customer_discount_lookup=None):
+def generate_catalog_file(job_id, sku_list=None, stock_lookup=None, rrp_lookup=None, map_lookup=None, customer_discount_lookup=None):
     if sku_list is None or stock_lookup is None:
         job = get_job(job_id)
         if not job:
@@ -1099,10 +1099,14 @@ def generate_catalog_file(job_id, sku_list=None, stock_lookup=None, rrp_lookup=N
             stock_lookup = payload.get("stock_lookup", {})
         if rrp_lookup is None:
             rrp_lookup = payload.get("rrp_lookup", {})
+        if map_lookup is None:
+            map_lookup = payload.get("map_lookup", {})
         if customer_discount_lookup is None:
             customer_discount_lookup = payload.get("customer_discount_lookup", {})
     elif rrp_lookup is None:
         rrp_lookup = {}
+    if map_lookup is None:
+        map_lookup = {}
     if customer_discount_lookup is None:
         customer_discount_lookup = {}
 
@@ -1535,11 +1539,11 @@ def start_catalog_job():
         return jsonify({"success": False, "error": "Please upload a CSV or XLSX file."}), 400
 
     try:
-        _df, sku_list, stock_lookup, rrp_lookup, customer_discount_lookup = parse_uploaded_file(uploaded_file)
+        _df, sku_list, stock_lookup, rrp_lookup, map_lookup, customer_discount_lookup = parse_uploaded_file(uploaded_file)
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 
-    job = create_job(current_user.id, sku_list, stock_lookup, rrp_lookup, customer_discount_lookup)
+    job = create_job(current_user.id, sku_list, stock_lookup, rrp_lookup, map_lookup, customer_discount_lookup)
     return jsonify({"success": True, "job": public_job(job)}), 202
 
 
